@@ -1,0 +1,17 @@
+{
+  "name": "wxkf-mvp",
+  "version": "0.1.0",
+  "description": "企业微信「微信客服」接入 MVP：收消息 -> 拉消息 -> 原样回显",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
