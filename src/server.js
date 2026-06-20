@@ -13,6 +13,13 @@ import {
 } from "./wecom.js";
 import { getCursor, setCursor } from "./cursor.js";
 import * as store from "./store.js";
+import {
+  hashPassword,
+  verifyPassword,
+  createSession,
+  validateSession,
+  destroySession,
+} from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,6 +28,8 @@ const {
   WXKF_SECRET,
   WXKF_TOKEN,
   WXKF_AES_KEY,
+  AUTH_USERNAME = "admin",
+  AUTH_PASSWORD = "admin123",
   PORT = 3000,
 } = process.env;
 
@@ -36,12 +45,44 @@ for (const [k, v] of Object.entries({
   }
 }
 
+// 启动时：如果 AUTH_PASSWORD 是明文（不是 scrypt hash），自动哈希
+// hash 格式: salt:scryptHash，通过 ":" 分隔判断
+let passwordHash = AUTH_PASSWORD.includes(":")
+  ? AUTH_PASSWORD
+  : hashPassword(AUTH_PASSWORD);
+
+// 如果 .env 里还是默认密码，打印提示
+if (AUTH_PASSWORD === "admin123") {
+  console.warn("⚠ 使用默认密码 admin123，请在生产环境修改 AUTH_PASSWORD");
+}
+
 const app = express();
 app.use(express.json()); // API 用 JSON body
 // 静态目录：企业微信域名归属认证文件（WW_verify_*.txt）等放这里，根路径可访问
 app.use(express.static("public"));
 // 回调 body 是 XML，用 raw text 接收，避免 JSON 解析报错
 app.use("/wxkf/callback", express.text({ type: "*/*" }));
+
+// ---- Auth middleware ----
+function parseCookie(cookieHeader, name) {
+  if (!cookieHeader) return "";
+  const m = cookieHeader.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
+function requireAuth(req, res, next) {
+  const token = parseCookie(req.headers.cookie, "token");
+  const username = validateSession(token);
+  if (!username) {
+    // API 返回 401，页面重定向到 /login
+    if (req.path.startsWith("/api/")) {
+      return res.status(401).json({ error: "未登录" });
+    }
+    return res.redirect("/login");
+  }
+  req.username = username;
+  next();
+}
 
 // 从 XML 里取某个标签的值（兼容 CDATA 与纯文本）
 function pick(xml, tag) {
@@ -163,6 +204,44 @@ async function handleNewMessages({ token, openKfId }) {
   }
 }
 
+// ---- 登录页面（公开） ----
+app.get("/login", (_req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "login.html"));
+});
+
+// ---- 登录 API（公开） ----
+app.post("/api/login", (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ ok: false, error: "请输入账号和密码" });
+  }
+  if (username !== AUTH_USERNAME || !verifyPassword(password, passwordHash)) {
+    return res.status(401).json({ ok: false, error: "账号或密码错误" });
+  }
+  const token = createSession(username);
+  // Set cookie: HttpOnly, SameSite=Lax, 24h expiry
+  res.setHeader(
+    "Set-Cookie",
+    `token=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400`,
+  );
+  res.json({ ok: true });
+});
+
+// ---- 退出 ----
+app.post("/api/logout", (req, res) => {
+  const token = parseCookie(req.headers.cookie, "token");
+  destroySession(token);
+  res.setHeader(
+    "Set-Cookie",
+    "token=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0",
+  );
+  res.json({ ok: true });
+});
+
+// ---- 以下路由需要登录 ----
+app.use("/chat", requireAuth);
+app.use("/api/", requireAuth);
+
 // ---- API：会话列表 ----
 app.get("/api/conversations", (_req, res) => {
   const convs = store.conversations();
@@ -237,7 +316,7 @@ app.get("/api/messages", (req, res) => {
 
 // ---- 聊天页面 ----
 app.get("/chat", (_req, res) => {
-  res.sendFile(path.join(__dirname, "..", "public", "chat.html"));
+  res.sendFile(path.join(__dirname, "..", "views", "chat.html"));
 });
 
 app.get("/healthz", (_req, res) => res.send("ok"));

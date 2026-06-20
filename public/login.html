@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>登录 — wxkf-mvp</title>
+<style>
+  :root {
+    --bg: #f0f2f5;
+    --card-bg: #fff;
+    --text: #111b21;
+    --text-secondary: #667781;
+    --accent: #00a884;
+    --border: #e9edef;
+    --input-bg: #f5f6f6;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    height: 100vh; height: 100dvh;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg); color: var(--text);
+  }
+  .card {
+    background: var(--card-bg); border-radius: 12px; padding: 40px 32px;
+    width: 360px; max-width: calc(100vw - 32px);
+    box-shadow: 0 2px 12px rgba(0,0,0,.08);
+  }
+  .card h1 { font-size: 22px; text-align: center; margin-bottom: 4px; }
+  .card .sub { font-size: 13px; color: var(--text-secondary); text-align: center; margin-bottom: 28px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; color: var(--text-secondary); }
+  .field input {
+    width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 15px; font-family: inherit; outline: none; background: var(--input-bg);
+  }
+  .field input:focus { border-color: var(--accent); background: #fff; }
+  .btn {
+    width: 100%; padding: 11px; background: var(--accent); color: #fff;
+    border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer;
+    margin-top: 8px;
+  }
+  .btn:active { opacity: .8; }
+  .btn:disabled { opacity: .4; }
+  @media (hover: hover) { .btn:hover { opacity: .9; } }
+  .error { color: #e53935; font-size: 13px; text-align: center; margin-top: 12px; display: none; }
+  .error.show { display: block; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🔐 客服后台</h1>
+  <p class="sub">企业微信客服消息管理</p>
+  <form id="login-form" onsubmit="return doLogin()">
+    <div class="field">
+      <label for="username">账号</label>
+      <input id="username" type="text" autocomplete="username" required autofocus>
+    </div>
+    <div class="field">
+      <label for="password">密码</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+    </div>
+    <button type="submit" class="btn" id="submit-btn">登 录</button>
+  </form>
+  <p class="error" id="error-msg"></p>
+</div>
+
+<script>
+async function doLogin() {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  if (!username || !password) return false;
+
+  const btn = document.getElementById('submit-btn');
+  const err = document.getElementById('error-msg');
+  btn.disabled = true; btn.textContent = '…'; err.classList.remove('show');
+
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      window.location.href = '/chat';
+    } else {
+      err.textContent = data.error || '登录失败';
+      err.classList.add('show');
+    }
+  } catch (e) {
+    err.textContent = '网络错误，请重试';
+    err.classList.add('show');
+  }
+
+  btn.disabled = false; btn.textContent = '登 录';
+  return false;
+}
+</script>
+</body>
+</html>
