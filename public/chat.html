@@ -119,6 +119,31 @@
     background: #e1f3ec; padding: 3px 10px; border-radius: 6px;
   }
 
+  /* ===== Input bar ===== */
+  .input-bar {
+    padding: 8px 12px; background: var(--sidebar-bg); border-top: 1px solid var(--border);
+    display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0;
+  }
+  .input-bar textarea {
+    flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+    font-size: 15px; font-family: inherit; resize: none; outline: none;
+    max-height: 100px; line-height: 1.4;
+  }
+  .input-bar textarea:focus { border-color: var(--accent); }
+  .input-bar button {
+    background: var(--accent); color: #fff; border: none; border-radius: 8px;
+    padding: 8px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+    flex-shrink: 0; white-space: nowrap;
+  }
+  .input-bar button:active { opacity: .8; }
+  .input-bar button:disabled { opacity: .4; }
+  @media (hover: hover) { .input-bar button:hover { opacity: .9; } }
+  @media (max-width: 767px) {
+    .input-bar { padding: 8px 10px; gap: 6px; }
+    .input-bar textarea { font-size: 16px; } /* prevent iOS zoom on focus */
+    .input-bar button { padding: 8px 12px; font-size: 14px; }
+  }
+
   /* ===== Mobile: two-panel toggle ===== */
   @media (max-width: 767px) {
     .sidebar {
@@ -175,6 +200,10 @@
   </div>
   <div class="chat-placeholder" id="chat-placeholder">← 选择一个会话查看聊天记录</div>
   <div class="messages" id="messages" style="display:none"></div>
+  <div class="input-bar" id="input-bar" style="display:none">
+    <textarea id="msg-input" rows="1" placeholder="输入回复…" onkeydown="onInputKey(event)"></textarea>
+    <button onclick="sendMessage()" id="send-btn">发送</button>
+  </div>
 </main>
 
 <script>
@@ -233,6 +262,10 @@ function showPanel(panel) {
 function goBack() {
   currentUser = null;
   currentOpenKfId = null;
+  $id('input-bar').style.display = 'none';
+  $id('chat-header').style.display = 'none';
+  $id('messages').style.display = 'none';
+  $id('chat-placeholder').style.display = 'flex';
   showPanel('sidebar');
 }
 
@@ -280,6 +313,7 @@ async function selectUser(user, openKfId) {
   $id('chat-placeholder').style.display = 'none';
   $id('messages').style.display = 'flex';
   $id('chat-header').style.display = 'flex';
+  $id('input-bar').style.display = 'flex';
 
   // Update sidebar active
   document.querySelectorAll('.conv-item').forEach(el => {
@@ -319,6 +353,48 @@ function escapeHtml(s) {
   div.textContent = s;
   return div.innerHTML;
 }
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 100) + 'px';
+}
+
+function onInputKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+async function sendMessage() {
+  const input = $id('msg-input');
+  const content = input.value.trim();
+  if (!content || !currentUser || !currentOpenKfId) return;
+
+  const btn = $id('send-btn');
+  btn.disabled = true;
+  btn.textContent = '…';
+
+  const res = await API.send(currentUser, currentOpenKfId, content);
+
+  btn.disabled = false;
+  btn.textContent = '发送';
+
+  if (res.ok) {
+    input.value = '';
+    autoResize(input);
+    // Refresh to show the sent message
+    await selectUser(currentUser, currentOpenKfId);
+  } else {
+    alert(res.errmsg || '发送失败');
+  }
+}
+
+// Auto-resize textarea on input
+document.addEventListener('DOMContentLoaded', () => {
+  const input = $id('msg-input');
+  if (input) input.addEventListener('input', () => autoResize(input));
+});
 
 async function refresh() {
   await loadConversations();
