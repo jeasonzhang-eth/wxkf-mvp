@@ -1,10 +1,15 @@
 // 企业微信「微信客服」接入 MVP
 // 闭环：回调收到事件 -> 校验解密拿 Token -> sync_msg 拉消息 -> send_msg 原样回显
 import "./loadenv.js"; // 必须最先 import，加载 .env 到 process.env
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import { verifySignature, decrypt } from "./wxcrypt.js";
 import { getAccessToken, syncMsg, sendText } from "./wecom.js";
 import { getCursor, setCursor } from "./cursor.js";
+import * as store from "./store.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const {
   WXKF_CORPID,
@@ -91,15 +96,44 @@ async function handleNewMessages({ token, openKfId }) {
   while (hasMore) {
     const data = await syncMsg(accessToken, { token, cursor, openKfId });
     for (const msg of data.msg_list || []) {
-      // origin=3 表示用户发的消息（4=系统，5=接待人员），只回显用户文本
+      const timestamp = msg.send_time
+        ? new Date(msg.send_time * 1000).toISOString()
+        : new Date().toISOString();
+
+      // 存储所有文本消息（origin=3 用户, origin=5 接待人员）
+      if (msg.msgtype === "text" && (msg.origin === 3 || msg.origin === 5)) {
+        store.append({
+          msgid: msg.msgid || "",
+          external_userid: msg.external_userid || "",
+          open_kfid: msg.open_kfid || openKfId,
+          direction: msg.origin === 3 ? "in" : "out",
+          msgtype: "text",
+          content: msg.text?.content || "",
+          timestamp,
+        });
+      }
+
+      // origin=3 表示用户发的消息，原样回显
       if (msg.origin === 3 && msg.msgtype === "text") {
         const content = msg.text?.content || "";
         console.log(`收到 ${msg.external_userid}: ${content}`);
-        await sendText(accessToken, {
+        const res = await sendText(accessToken, {
           toUser: msg.external_userid,
           openKfId: msg.open_kfid || openKfId,
           content: `你说的是：${content}`,
         });
+        // 存储客服发出的回复
+        if (res.errcode === 0) {
+          store.append({
+            msgid: res.msgid || "",
+            external_userid: msg.external_userid,
+            open_kfid: msg.open_kfid || openKfId,
+            direction: "out",
+            msgtype: "text",
+            content: `你说的是：${content}`,
+            timestamp: new Date().toISOString(),
+          });
+        }
       }
     }
     cursor = data.next_cursor || cursor;
@@ -107,6 +141,23 @@ async function handleNewMessages({ token, openKfId }) {
     hasMore = data.has_more === 1;
   }
 }
+
+// ---- API：会话列表 ----
+app.get("/api/conversations", (_req, res) => {
+  res.json(store.conversations());
+});
+
+// ---- API：某用户的聊天记录 ----
+app.get("/api/messages", (req, res) => {
+  const user = req.query.user;
+  if (!user) return res.status(400).json({ error: "缺少 user 参数" });
+  res.json(store.byUser(user));
+});
+
+// ---- 聊天页面 ----
+app.get("/chat", (_req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "chat.html"));
+});
 
 app.get("/healthz", (_req, res) => res.send("ok"));
 
