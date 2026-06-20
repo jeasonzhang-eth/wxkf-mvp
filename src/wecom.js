@@ -62,7 +62,7 @@ export async function batchGetCustomers(accessToken, externalUserids) {
       continue;
     }
     for (const c of data.customer_list || []) {
-      result[c.external_userid] = { name: c.name, avatar: c.avatar || "" };
+      result[c.external_userid] = { name: c.nickname, avatar: c.avatar || "" };
     }
   }
   return result;
