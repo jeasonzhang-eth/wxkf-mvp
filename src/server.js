@@ -5,7 +5,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { verifySignature, decrypt } from "./wxcrypt.js";
-import { getAccessToken, syncMsg, sendText } from "./wecom.js";
+import {
+  getAccessToken,
+  syncMsg,
+  sendText,
+  batchGetCustomers,
+} from "./wecom.js";
 import { getCursor, setCursor } from "./cursor.js";
 import * as store from "./store.js";
 
@@ -32,6 +37,7 @@ for (const [k, v] of Object.entries({
 }
 
 const app = express();
+app.use(express.json()); // API 用 JSON body
 // 静态目录：企业微信域名归属认证文件（WW_verify_*.txt）等放这里，根路径可访问
 app.use(express.static("public"));
 // 回调 body 是 XML，用 raw text 接收，避免 JSON 解析报错
@@ -140,11 +146,86 @@ async function handleNewMessages({ token, openKfId }) {
     if (cursor) setCursor(openKfId, cursor);
     hasMore = data.has_more === 1;
   }
+
+  // 解析新用户名称（本地没有缓存的才调 API）
+  const users = store.conversations().map((c) => c.external_userid);
+  const existing = store.getAllNames();
+  const missing = users.filter((u) => !existing[u]);
+  if (missing.length > 0) {
+    try {
+      const info = await batchGetCustomers(accessToken, missing);
+      for (const [id, { name }] of Object.entries(info)) {
+        if (name) store.setName(id, name);
+      }
+    } catch (e) {
+      console.error("批量获取客户信息失败:", e.message);
+    }
+  }
 }
 
 // ---- API：会话列表 ----
 app.get("/api/conversations", (_req, res) => {
-  res.json(store.conversations());
+  const convs = store.conversations();
+  const names = store.getAllNames();
+  res.json(
+    convs.map((c) => ({
+      ...c,
+      name: names[c.external_userid] || null,
+    })),
+  );
+});
+
+// ---- API：发送消息给用户（从 chat 页面回复） ----
+app.post("/api/send", async (req, res) => {
+  const { toUser, openKfId, content } = req.body || {};
+  if (!toUser || !openKfId || !content) {
+    return res.status(400).json({ error: "缺少参数 toUser/openKfId/content" });
+  }
+  try {
+    const accessToken = await getAccessToken(WXKF_CORPID, WXKF_SECRET);
+    const apiRes = await sendText(accessToken, { toUser, openKfId, content });
+    if (apiRes.errcode === 0) {
+      store.append({
+        msgid: apiRes.msgid || "",
+        external_userid: toUser,
+        open_kfid: openKfId,
+        direction: "out",
+        msgtype: "text",
+        content,
+        timestamp: new Date().toISOString(),
+      });
+      return res.json({ ok: true, msgid: apiRes.msgid });
+    }
+    res.json({ ok: false, errcode: apiRes.errcode, errmsg: apiRes.errmsg });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- API：批量获取用户名称 ----
+app.post("/api/names", async (req, res) => {
+  const { users } = req.body || {};
+  if (!users || users.length === 0) return res.json({ names: {} });
+
+  // 先查本地缓存
+  const names = store.getNames(users);
+  const missing = users.filter((u) => !names[u]);
+
+  if (missing.length > 0) {
+    try {
+      const accessToken = await getAccessToken(WXKF_CORPID, WXKF_SECRET);
+      const info = await batchGetCustomers(accessToken, missing);
+      for (const [id, { name }] of Object.entries(info)) {
+        if (name) {
+          store.setName(id, name);
+          names[id] = name;
+        }
+      }
+    } catch (e) {
+      console.error("批量获取客户信息失败:", e.message);
+    }
+  }
+  res.json({ names });
 });
 
 // ---- API：某用户的聊天记录 ----

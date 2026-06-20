@@ -39,6 +39,40 @@ export function byUser(externalUserid) {
   return load().filter((m) => m.external_userid === externalUserid);
 }
 
+// ---- 用户名称缓存 ----
+const NAMES_FILE = path.join(__dirname, "..", "names.json");
+
+function loadNames() {
+  try {
+    return JSON.parse(fs.readFileSync(NAMES_FILE, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveNames(names) {
+  fs.writeFileSync(NAMES_FILE, JSON.stringify(names, null, 2));
+}
+
+export function setName(externalUserid, name) {
+  const names = loadNames();
+  names[externalUserid] = name;
+  saveNames(names);
+}
+
+export function getNames(externalUserids) {
+  const names = loadNames();
+  const result = {};
+  for (const id of externalUserids) {
+    if (names[id]) result[id] = names[id];
+  }
+  return result;
+}
+
+export function getAllNames() {
+  return loadNames();
+}
+
 // 列出所有会话（按 external_userid 分组，含最后一条消息时间和内容预览）
 export function conversations() {
   const messages = load();

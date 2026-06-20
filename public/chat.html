@@ -127,9 +127,12 @@
 const API = {
   conversations: () => fetch('/api/conversations').then(r => r.json()).catch(() => []),
   messages: user => fetch('/api/messages?user=' + encodeURIComponent(user)).then(r => r.json()).catch(() => []),
+  names: users => fetch('/api/names', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ users }) }).then(r => r.json()).then(d => d.names).catch(() => ({})),
+  send: (toUser, openKfId, content) => fetch('/api/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ toUser, openKfId, content }) }).then(r => r.json()).catch(() => ({ ok: false })),
 };
 
 let currentUser = null;
+let currentOpenKfId = null;
 let autoRefreshTimer = null;
 
 function fmtTime(iso) {
@@ -154,6 +157,11 @@ function isSameDay(a, b) {
   return da.toDateString() === db.toDateString();
 }
 
+function displayName(conv) {
+  return conv.name || conv.external_userid;
+}
+
+// Fetch names in batch and render conv list
 async function loadConversations() {
   const convs = await API.conversations();
   const list = document.getElementById('conv-list');
@@ -161,14 +169,24 @@ async function loadConversations() {
     list.innerHTML = '<div class="empty-state">暂无聊天记录</div>';
     return;
   }
+  // Batch fetch names for users without a cached name
+  const missing = convs.filter(c => !c.name).map(c => c.external_userid);
+  if (missing.length > 0) {
+    const freshNames = await API.names(missing);
+    // Merge fresh names into convs
+    for (const c of convs) {
+      if (!c.name && freshNames[c.external_userid]) c.name = freshNames[c.external_userid];
+    }
+  }
   list.innerHTML = convs.map(c => {
     const tag = c.last_direction === 'in'
       ? '<span class="direction-tag in">用户→</span>'
       : '<span class="direction-tag out">←客服</span>';
+    const name = displayName(c);
     return `<div class="conv-item${c.external_userid === currentUser ? ' active' : ''}"
-      onclick="selectUser('${c.external_userid}')">
+      onclick="selectUser('${c.external_userid}', '${c.open_kfid || ''}')">
       <div class="top">
-        <span class="user">${c.external_userid}</span>
+        <span class="user" data-uid="${c.external_userid}">${escapeHtml(name)}</span>
         <span class="time">${fmtTime(c.last_message_at)}</span>
       </div>
       <div class="preview">${tag} ${c.last_content || ''}</div>
@@ -177,17 +195,23 @@ async function loadConversations() {
   }).join('');
 }
 
-async function selectUser(user) {
+async function selectUser(user, openKfId) {
   currentUser = user;
+  currentOpenKfId = openKfId;
   document.getElementById('chat-placeholder').style.display = 'none';
   document.getElementById('messages').style.display = 'flex';
   document.getElementById('chat-header').style.display = 'flex';
-  document.getElementById('chat-user-name').textContent = '💬 与 ';
-  document.getElementById('chat-user-id').textContent = user;
+
+  // Update header with name
+  const convs = await API.conversations();
+  const conv = convs.find(c => c.external_userid === user);
+  const name = conv ? displayName(conv) : user;
+  document.getElementById('chat-user-name').textContent = '💬 ';
+  document.getElementById('chat-user-id').textContent = name + ' (' + user + ')';
 
   // Update active state
   document.querySelectorAll('.conv-item').forEach(el => {
-    el.classList.toggle('active', el.querySelector('.user')?.textContent === user);
+    el.classList.toggle('active', el.querySelector('.user[data-uid]')?.dataset.uid === user);
   });
 
   const msgs = await API.messages(user);
@@ -200,7 +224,7 @@ async function selectUser(user) {
       : '';
     lastDate = m.timestamp;
     const dir = m.direction === 'in' ? 'in' : 'out';
-    const label = dir === 'in' ? '用户' : '客服';
+    const label = dir === 'in' ? (name) : '客服';
     return divider + `<div class="msg-row ${dir}">
       <div class="msg-bubble">
         <div>${escapeHtml(m.content)}</div>
@@ -225,9 +249,8 @@ async function refresh() {
   const dot = document.getElementById('status-dot');
   dot.classList.remove('offline');
   setTimeout(() => dot.classList.add('offline'), 300);
-  // If a user is selected, refresh their messages too
   if (currentUser) {
-    await selectUser(currentUser);
+    await selectUser(currentUser, currentOpenKfId);
   }
 }
 
@@ -238,10 +261,9 @@ autoRefreshTimer = setInterval(async () => {
     const msgs = await API.messages(currentUser);
     const container = document.getElementById('messages');
     const wasAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 50;
-    // Only re-render if message count changed
     const currentCount = container.querySelectorAll('.msg-row').length;
     if (msgs.length !== currentCount) {
-      await selectUser(currentUser);
+      await selectUser(currentUser, currentOpenKfId);
       if (wasAtBottom) container.scrollTop = container.scrollHeight;
     }
   }
