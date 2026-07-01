@@ -35,6 +35,14 @@
     font-size: 15px; font-family: inherit; outline: none; background: var(--input-bg);
   }
   .field input:focus { border-color: var(--accent); background: #fff; }
+  .pw-wrap { position: relative; }
+  .pw-wrap input { padding-right: 44px; }
+  .pw-toggle {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; cursor: pointer; font-size: 18px; padding: 4px 6px;
+    line-height: 1; opacity: .6;
+  }
+  .pw-toggle:active { opacity: 1; }
   .btn {
     width: 100%; padding: 11px; background: var(--accent); color: #fff;
     border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer;
@@ -51,14 +59,17 @@
 <div class="card">
   <h1>🔐 客服后台</h1>
   <p class="sub">企业微信客服消息管理</p>
-  <form id="login-form" onsubmit="return doLogin()">
+  <form id="login-form" onsubmit="event.preventDefault(); doLogin(); return false;">
     <div class="field">
       <label for="username">账号</label>
       <input id="username" type="text" autocomplete="username" required autofocus>
     </div>
     <div class="field">
       <label for="password">密码</label>
-      <input id="password" type="password" autocomplete="current-password" required>
+      <div class="pw-wrap">
+        <input id="password" type="password" autocomplete="current-password" required>
+        <button type="button" class="pw-toggle" id="pw-toggle" onclick="togglePw()" title="显示/隐藏密码">👁</button>
+      </div>
     </div>
     <button type="submit" class="btn" id="submit-btn">登 录</button>
   </form>
@@ -66,6 +77,14 @@
 </div>
 
 <script>
+function togglePw() {
+  const inp = document.getElementById('password');
+  const btn = document.getElementById('pw-toggle');
+  const show = inp.type === 'password';
+  inp.type = show ? 'text' : 'password';
+  btn.textContent = show ? '🙈' : '👁';
+}
+
 async function doLogin() {
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value;
