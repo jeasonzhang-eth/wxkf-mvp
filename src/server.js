@@ -10,6 +10,7 @@ import {
   syncMsg,
   sendText,
   batchGetCustomers,
+  kfAccountNames,
 } from "./wecom.js";
 import { getCursor, setCursor } from "./cursor.js";
 import * as store from "./store.js";
@@ -243,13 +244,28 @@ app.use("/chat", requireAuth);
 app.use("/api/", requireAuth);
 
 // ---- API：会话列表 ----
-app.get("/api/conversations", (_req, res) => {
+app.get("/api/conversations", async (_req, res) => {
   const convs = store.conversations();
   const names = store.getAllNames();
+
+  // 客服账号名：本地缓存缺失时拉一次 kf/account/list
+  let kfNames = store.getAllKfNames();
+  const kfIds = [...new Set(convs.map((c) => c.open_kfid))];
+  if (kfIds.some((id) => !kfNames[id])) {
+    try {
+      const accessToken = await getAccessToken(WXKF_CORPID, WXKF_SECRET);
+      kfNames = await kfAccountNames(accessToken);
+      store.setKfNames(kfNames);
+    } catch (e) {
+      console.error("拉客服账号列表失败:", e.message);
+    }
+  }
+
   res.json(
     convs.map((c) => ({
       ...c,
       name: names[c.external_userid] || null,
+      kf_name: kfNames[c.open_kfid] || null,
     })),
   );
 });
@@ -307,11 +323,12 @@ app.post("/api/names", async (req, res) => {
   res.json({ names });
 });
 
-// ---- API：某用户的聊天记录 ----
+// ---- API：某用户在某客服下的聊天记录 ----
 app.get("/api/messages", (req, res) => {
   const user = req.query.user;
+  const kf = req.query.kf; // open_kfid，可选
   if (!user) return res.status(400).json({ error: "缺少 user 参数" });
-  res.json(store.byUser(user));
+  res.json(store.byUser(user, kf));
 });
 
 // ---- 聊天页面 ----

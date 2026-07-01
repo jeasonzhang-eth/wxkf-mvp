@@ -17,3 +17,4 @@
 ## 2026-07-01
 - **fix**: 登录表单 async onsubmit 返回 Promise 拦不住原生提交，页面刷新导致「点击无反应」；改用 preventDefault
 - **feat**: 登录页密码框加显示/隐藏切换（眼睛按钮）
+- **feat**: 支持一个应用监控多个客服账号 —— 会话按 `open_kfid + external_userid` 组合分组，列表/聊天头显示客服账号名（`kf/account/list` 拉取缓存到 `kf_accounts.json`），消息按客服过滤，避免同一用户跨客服合并

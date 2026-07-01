@@ -34,9 +34,13 @@ export function all() {
   return load();
 }
 
-// 按 external_userid 获取消息
-export function byUser(externalUserid) {
-  return load().filter((m) => m.external_userid === externalUserid);
+// 按 external_userid（可选 open_kfid）获取消息
+export function byUser(externalUserid, openKfId) {
+  return load().filter(
+    (m) =>
+      m.external_userid === externalUserid &&
+      (!openKfId || m.open_kfid === openKfId),
+  );
 }
 
 // ---- 用户名称缓存 ----
@@ -73,14 +77,30 @@ export function getAllNames() {
   return loadNames();
 }
 
-// 列出所有会话（按 external_userid 分组，含最后一条消息时间和内容预览）
+// ---- 客服账号名称缓存（open_kfid -> 名称）----
+const KF_FILE = path.join(__dirname, "..", "kf_accounts.json");
+
+export function getAllKfNames() {
+  try {
+    return JSON.parse(fs.readFileSync(KF_FILE, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+export function setKfNames(map) {
+  fs.writeFileSync(KF_FILE, JSON.stringify(map, null, 2));
+}
+
+// 列出所有会话（按 open_kfid + external_userid 组合分组）
 export function conversations() {
   const messages = load();
   const map = new Map();
   for (const m of messages) {
-    const prev = map.get(m.external_userid);
+    const key = `${m.open_kfid}::${m.external_userid}`;
+    const prev = map.get(key);
     if (!prev || m.timestamp > prev.last_message_at) {
-      map.set(m.external_userid, {
+      map.set(key, {
         external_userid: m.external_userid,
         open_kfid: m.open_kfid,
         last_message_at: m.timestamp,

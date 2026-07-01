@@ -68,6 +68,20 @@ export async function batchGetCustomers(accessToken, externalUserids) {
   return result;
 }
 
+// 获取客服账号列表，返回 { open_kfid: name }
+export async function kfAccountNames(accessToken) {
+  const url = `${BASE}/kf/account/list?access_token=${accessToken}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.errcode !== 0) {
+    console.error(`kf/account/list 失败: ${data.errcode} ${data.errmsg}`);
+    return {};
+  }
+  return Object.fromEntries(
+    (data.account_list || []).map((a) => [a.open_kfid, a.name]),
+  );
+}
+
 // 发送文本消息给用户
 export async function sendText(accessToken, { toUser, openKfId, content }) {
   const url = `${BASE}/kf/send_msg?access_token=${accessToken}`;

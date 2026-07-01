@@ -66,6 +66,10 @@
   }
   .conv-item .direction-tag.in { background: #e3f2fd; color: #1565c0; }
   .conv-item .direction-tag.out { background: #e8f5e9; color: #2e7d32; }
+  .conv-item .kf-badge {
+    display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 8px;
+    background: #fff3e0; color: #e65100; margin-right: 6px; font-weight: 500;
+  }
   .empty-state {
     padding: 48px 16px; text-align: center; color: var(--text-secondary); font-size: 14px;
   }
@@ -220,7 +224,7 @@ async function apiFetch(url, opts = {}) {
 
 const API = {
   conversations: () => apiFetch('/api/conversations').then(r => r?.json()).catch(() => []),
-  messages: user => apiFetch('/api/messages?user=' + encodeURIComponent(user)).then(r => r?.json()).catch(() => []),
+  messages: (user, kf) => apiFetch('/api/messages?user=' + encodeURIComponent(user) + (kf ? '&kf=' + encodeURIComponent(kf) : '')).then(r => r?.json()).catch(() => []),
   names: users => apiFetch('/api/names', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ users }) }).then(r => r?.json()).then(d => d?.names).catch(() => ({})),
   send: (toUser, openKfId, content) => apiFetch('/api/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ toUser, openKfId, content }) }).then(r => r?.json()).catch(() => ({ ok: false })),
 };
@@ -296,14 +300,17 @@ async function loadConversations() {
       ? '<span class="direction-tag in">用户→</span>'
       : '<span class="direction-tag out">←客服</span>';
     const name = displayName(c);
-    return `<div class="conv-item${c.external_userid === currentUser ? ' active' : ''}"
+    const active = c.external_userid === currentUser && c.open_kfid === currentOpenKfId;
+    const kfBadge = c.kf_name ? `<span class="kf-badge">${escapeHtml(c.kf_name)}</span>` : '';
+    return `<div class="conv-item${active ? ' active' : ''}"
+      data-uid="${c.external_userid}" data-kf="${c.open_kfid || ''}"
       onclick="selectUser('${c.external_userid}', '${c.open_kfid || ''}')">
       <div class="top">
-        <span class="user" data-uid="${c.external_userid}">${escapeHtml(name)}</span>
+        <span class="user">${escapeHtml(name)}</span>
         <span class="time">${fmtTime(c.last_message_at)}</span>
       </div>
       <div class="preview">${tag} ${c.last_content || ''}</div>
-      <div class="meta">${c.message_count} 条消息</div>
+      <div class="meta">${kfBadge}${c.message_count} 条消息</div>
     </div>`;
   }).join('');
 }
@@ -314,26 +321,27 @@ async function selectUser(user, openKfId) {
 
   const convs = await API.conversations();
   if (!convs) return; // 401 redirect
-  const conv = convs.find(c => c.external_userid === user);
+  const conv = convs.find(c => c.external_userid === user && c.open_kfid === openKfId);
   const name = conv ? displayName(conv) : user;
+  const kfName = conv?.kf_name || '';
 
   $id('chat-name').textContent = name;
-  $id('chat-uid').textContent = user;
+  $id('chat-uid').textContent = (kfName ? kfName + ' · ' : '') + user;
   $id('chat-placeholder').style.display = 'none';
   $id('messages').style.display = 'flex';
   $id('chat-header').style.display = 'flex';
   $id('input-bar').style.display = 'flex';
 
-  // Update sidebar active
+  // Update sidebar active (composite: user + open_kfid)
   document.querySelectorAll('.conv-item').forEach(el => {
-    el.classList.toggle('active', el.querySelector('.user[data-uid]')?.dataset.uid === user);
+    el.classList.toggle('active', el.dataset.uid === user && el.dataset.kf === openKfId);
   });
 
   // On mobile, switch to chat panel
   if (IS_MOBILE) showPanel('chat');
 
-  // Render messages
-  const msgs = await API.messages(user);
+  // Render messages (filtered by this 客服账号)
+  const msgs = await API.messages(user, openKfId);
   if (!msgs) return; // 401 redirect
   const container = $id('messages');
   let lastDate = '';
@@ -423,7 +431,7 @@ setInterval(async () => {
     return;
   }
   await loadConversations();
-  const msgs = await API.messages(currentUser);
+  const msgs = await API.messages(currentUser, currentOpenKfId);
   if (!msgs) return; // 401 redirect
   const container = $id('messages');
   const wasAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 50;

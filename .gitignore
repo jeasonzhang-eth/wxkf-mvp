@@ -4,5 +4,6 @@ node_modules/
 cursor.json
 messages.json
 names.json
+kf_accounts.json
 
 .DS_Store
