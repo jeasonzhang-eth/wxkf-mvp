@@ -40,6 +40,22 @@
   .sidebar-header .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; flex-shrink: 0; }
   .sidebar-header .dot.offline { background: #ffbc00; }
   .sidebar-header .title-text { flex: 1; }
+  .sb-back { background: none; border: none; color: #fff; cursor: pointer; font-size: 20px; padding: 0 6px 0 0; line-height: 1; flex-shrink: 0; }
+  .sb-back:active { opacity: .5; }
+  .kf-item {
+    padding: 16px; border-bottom: 1px solid var(--border); cursor: pointer;
+    display: flex; align-items: center; gap: 12px; -webkit-tap-highlight-color: transparent;
+  }
+  .kf-item:active { background: var(--hover); }
+  @media (hover: hover) { .kf-item:hover { background: var(--hover); } }
+  .kf-item .kf-avatar {
+    width: 40px; height: 40px; border-radius: 8px; background: var(--accent); color: #fff;
+    display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;
+  }
+  .kf-item .kf-info { flex: 1; min-width: 0; }
+  .kf-item .kf-name { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kf-item .kf-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .kf-item .kf-arrow { color: var(--text-secondary); font-size: 16px; flex-shrink: 0; }
   .refresh-btn {
     background: none; border: none; color: #fff; cursor: pointer;
     font-size: 20px; padding: 4px 8px; border-radius: 4px; line-height: 1;
@@ -184,12 +200,13 @@
 <!-- ===== Sidebar ===== -->
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-header">
+    <button class="sb-back" id="sb-back" onclick="backToKfList()" style="display:none" title="返回客服列表">←</button>
     <span class="dot" id="status-dot"></span>
-    <span class="title-text">客服聊天</span>
+    <span class="title-text" id="sb-title">客服账号</span>
     <button class="refresh-btn" onclick="refresh()" title="刷新">⟳</button>
   </div>
   <div class="conv-list" id="conv-list">
-    <div class="empty-state">暂无聊天记录</div>
+    <div class="empty-state">加载中…</div>
   </div>
 </aside>
 
@@ -224,6 +241,7 @@ async function apiFetch(url, opts = {}) {
 
 const API = {
   conversations: () => apiFetch('/api/conversations').then(r => r?.json()).catch(() => []),
+  kf: () => apiFetch('/api/kf').then(r => r?.json()).catch(() => []),
   messages: (user, kf) => apiFetch('/api/messages?user=' + encodeURIComponent(user) + (kf ? '&kf=' + encodeURIComponent(kf) : '')).then(r => r?.json()).catch(() => []),
   names: users => apiFetch('/api/names', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ users }) }).then(r => r?.json()).then(d => d?.names).catch(() => ({})),
   send: (toUser, openKfId, content) => apiFetch('/api/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ toUser, openKfId, content }) }).then(r => r?.json()).catch(() => ({ ok: false })),
@@ -231,6 +249,8 @@ const API = {
 
 let currentUser = null;
 let currentOpenKfId = null;
+let sidebarView = 'kf';        // 'kf' = 客服列表, 'users' = 某客服下的用户列表
+let selectedKf = null;         // { open_kfid, name }
 
 function fmtTime(iso) {
   if (!iso) return '';
@@ -280,12 +300,69 @@ function goBack() {
   showPanel('sidebar');
 }
 
-async function loadConversations() {
-  const convs = await API.conversations();
-  if (!convs) return; // 401 redirect
+// 侧边栏入口：按当前层级渲染
+async function loadSidebar() {
+  if (sidebarView === 'users' && selectedKf) return renderUsers();
+  return renderKfList();
+}
+
+// 一级：客服账号列表
+async function renderKfList() {
+  sidebarView = 'kf';
+  $id('sb-back').style.display = 'none';
+  $id('sb-title').textContent = '客服账号';
+
+  const [kfs, convs] = await Promise.all([API.kf(), API.conversations()]);
+  if (!kfs || !convs) return; // 401 redirect
+  const list = $id('conv-list');
+  if (!kfs.length) {
+    list.innerHTML = '<div class="empty-state">暂无客服账号</div>';
+    return;
+  }
+  // 每个客服的会话数 + 最近消息时间
+  const stat = {};
+  for (const c of convs) {
+    const s = stat[c.open_kfid] || (stat[c.open_kfid] = { count: 0, last: '' });
+    s.count += 1;
+    if (c.last_message_at > s.last) s.last = c.last_message_at;
+  }
+  list.innerHTML = kfs.map(k => {
+    const s = stat[k.open_kfid] || { count: 0, last: '' };
+    const sub = s.count ? `${s.count} 个会话 · ${fmtTime(s.last)}` : '暂无会话';
+    return `<div class="kf-item" data-kfid="${escapeHtml(k.open_kfid)}" data-name="${escapeHtml(k.name || '')}" onclick="openKf(this)">
+      <div class="kf-avatar">${escapeHtml((k.name || '客')[0])}</div>
+      <div class="kf-info">
+        <div class="kf-name">${escapeHtml(k.name || k.open_kfid)}</div>
+        <div class="kf-sub">${sub}</div>
+      </div>
+      <div class="kf-arrow">›</div>
+    </div>`;
+  }).join('');
+}
+
+// 进入某客服 → 二级
+function openKf(el) {
+  selectedKf = { open_kfid: el.dataset.kfid, name: el.dataset.name };
+  sidebarView = 'users';
+  renderUsers();
+}
+
+function backToKfList() {
+  selectedKf = null;
+  renderKfList();
+}
+
+// 二级：某客服下的用户会话列表
+async function renderUsers() {
+  $id('sb-back').style.display = 'inline';
+  $id('sb-title').textContent = selectedKf.name || '会话';
+
+  const all = await API.conversations();
+  if (!all) return; // 401 redirect
+  const convs = all.filter(c => c.open_kfid === selectedKf.open_kfid);
   const list = $id('conv-list');
   if (!convs.length) {
-    list.innerHTML = '<div class="empty-state">暂无聊天记录</div>';
+    list.innerHTML = '<div class="empty-state">该客服暂无会话</div>';
     return;
   }
   const missing = convs.filter(c => !c.name).map(c => c.external_userid);
@@ -301,7 +378,6 @@ async function loadConversations() {
       : '<span class="direction-tag out">←客服</span>';
     const name = displayName(c);
     const active = c.external_userid === currentUser && c.open_kfid === currentOpenKfId;
-    const kfBadge = c.kf_name ? `<span class="kf-badge">${escapeHtml(c.kf_name)}</span>` : '';
     return `<div class="conv-item${active ? ' active' : ''}"
       data-uid="${c.external_userid}" data-kf="${c.open_kfid || ''}"
       onclick="selectUser('${c.external_userid}', '${c.open_kfid || ''}')">
@@ -310,7 +386,7 @@ async function loadConversations() {
         <span class="time">${fmtTime(c.last_message_at)}</span>
       </div>
       <div class="preview">${tag} ${c.last_content || ''}</div>
-      <div class="meta">${kfBadge}${c.message_count} 条消息</div>
+      <div class="meta">${c.message_count} 条消息</div>
     </div>`;
   }).join('');
 }
@@ -415,7 +491,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function refresh() {
-  await loadConversations();
+  await loadSidebar();
   const dot = $id('status-dot');
   dot.classList.remove('offline');
   setTimeout(() => dot.classList.add('offline'), 300);
@@ -427,10 +503,10 @@ async function refresh() {
 // Auto-refresh every 5 seconds
 setInterval(async () => {
   if (!currentUser) {
-    await loadConversations();
+    await loadSidebar();
     return;
   }
-  await loadConversations();
+  await loadSidebar();
   const msgs = await API.messages(currentUser, currentOpenKfId);
   if (!msgs) return; // 401 redirect
   const container = $id('messages');
@@ -452,7 +528,7 @@ window.matchMedia('(min-width: 768px)').addEventListener('change', (e) => {
 });
 
 // Initial load
-loadConversations();
+loadSidebar();
 // On desktop, chat area starts visible (no panel toggle)
 if (!IS_MOBILE) $id('chat-area').classList.add('visible-on-mobile');
 </script>

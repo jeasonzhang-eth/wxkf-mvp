@@ -323,6 +323,23 @@ app.post("/api/names", async (req, res) => {
   res.json({ names });
 });
 
+// ---- API：所有客服账号列表 ----
+app.get("/api/kf", async (_req, res) => {
+  try {
+    const accessToken = await getAccessToken(WXKF_CORPID, WXKF_SECRET);
+    const kf = await kfAccountNames(accessToken); // { open_kfid: name }
+    store.setKfNames(kf);
+    res.json(
+      Object.entries(kf).map(([open_kfid, name]) => ({ open_kfid, name })),
+    );
+  } catch (e) {
+    const kf = store.getAllKfNames();
+    res.json(
+      Object.entries(kf).map(([open_kfid, name]) => ({ open_kfid, name })),
+    );
+  }
+});
+
 // ---- API：某用户在某客服下的聊天记录 ----
 app.get("/api/messages", (req, res) => {
   const user = req.query.user;
